@@ -1,0 +1,75 @@
+package in.ibm.poc.spring.config;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.PropertySource;
+import org.springframework.core.env.AbstractEnvironment;
+import org.springframework.core.env.EnumerablePropertySource;
+import org.springframework.core.env.MutablePropertySources;
+import org.springframework.util.StringUtils;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Arrays;
+import java.util.Properties;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
+
+@Configuration
+@PropertySource("classpath:receipting-config.properties")
+public class ReceiptingConfig {
+
+//    @Value("${appPropsPrefix}")
+    private String prefix = "receipting";
+
+    @Value("${secretMountPath}")
+    private String secretMountPath;
+
+    @Autowired
+    private AbstractEnvironment environment;
+
+    @Bean("applicationProperties")
+    public Properties getApplicationProperties(){
+        Properties properties = loadConfigProperties();
+        properties.putAll(loadSecretProperties());
+        return properties;
+    }
+
+    private Properties loadConfigProperties(){
+        Properties properties = new Properties();
+        MutablePropertySources propSrcs = environment.getPropertySources();
+        StreamSupport.stream(propSrcs.spliterator(), false)
+                .filter(ps -> ps instanceof EnumerablePropertySource)
+                .map(ps -> ((EnumerablePropertySource) ps).getPropertyNames())
+                .flatMap(Arrays::stream)
+                .filter(propName -> StringUtils.startsWithIgnoreCase(propName, prefix))
+                .forEach(propName -> properties.setProperty((propName.substring(propName.indexOf(".")+1)), environment.getProperty(propName)));
+        return properties;
+    }
+    private Properties loadSecretProperties(){
+        Properties props = new Properties();
+        try(Stream<Path> paths = Files.list(Paths.get(secretMountPath))){
+            props.putAll(paths.filter(path -> Files.isRegularFile(path) && path.getFileName().toString().startsWith("olas"))
+                    .map(path -> new String[]{path.getFileName().toString(), getFileContent(path)})
+                    .collect(Collectors.toMap(x-> x[0], x-> x[1])));
+        }catch(IOException ioe){
+            System.out.println("Exception while location properties");
+        }
+        props.keySet().stream().forEachOrdered(x-> System.out.println("key "+x+"--"+props.get(x)));
+        return props;
+    }
+
+    private String getFileContent(Path filePath){
+        try {
+            return Files.readAllLines(filePath).stream().collect(Collectors.joining("\\n"));
+        } catch (IOException e) {
+            System.out.println("Exception while reading the file in directory "+filePath.toFile().getName());
+            return null;
+        }
+    }
+}
